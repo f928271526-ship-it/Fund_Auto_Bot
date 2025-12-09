@@ -4,7 +4,7 @@ on:
   schedule:
     # 每天北京时间 14:40 运行 (UTC时间 06:40)
     # GitHub 用的是 UTC 时间，比我们慢 8 小时
-    - cron: '40 6 * * 1-5' # 周一到周五
+    - cron: '45 6 * * 1-5' # 周一到周五
   workflow_dispatch: # 允许你手动点击按钮运行 (方便测试)
 
 jobs:
