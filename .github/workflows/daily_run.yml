@@ -2,10 +2,9 @@ name: 基金自动巡航
 
 on:
   schedule:
-    # 每天北京时间 14:40 运行 (UTC时间 06:40)
-    # GitHub 用的是 UTC 时间，比我们慢 8 小时
-    - cron: '45 6 * * 1-5' # 周一到周五
-  workflow_dispatch: # 允许你手动点击按钮运行 (方便测试)
+    # 每天北京时间 14:45 运行 (UTC 06:45)
+    - cron: '45 6 * * 1-5'
+  workflow_dispatch: # 允许手动点击运行
 
 jobs:
   run_bot:
@@ -24,8 +23,23 @@ jobs:
       run: |
         pip install akshare pandas requests sqlalchemy pymysql
         
+    # --- 🔥【新增步骤】现场生成 config.py ---
+    - name: 生成配置文件
+      run: |
+        echo "import os" > config.py
+        echo "PUSH_CONFIG = {'token': os.environ.get('PUSH_TOKEN')}" >> config.py
+        echo "DB_CONFIG = {'user': 'root', 'password': os.environ.get('DB_PASSWORD'), 'host': os.environ.get('DB_HOST'), 'port': 3306, 'database': 'fund_db'}" >> config.py
+        echo "MY_FUNDS = {" >> config.py
+        echo "    '012363': '国泰证券'," >> config.py
+        echo "    '015916': '永赢医药'," >> config.py
+        echo "    '013275': '富国煤炭'," >> config.py
+        echo "    '270042': '广发纳指100'," >> config.py
+        echo "    '017437': '华宝纳指精选'" >> config.py
+        echo "}" >> config.py
+        
     - name: 运行侦察兵 (Realtime)
-      env: # 把保险箱里的密码注入进去
+      env:
+        # 把 GitHub Secrets 注入到环境变量
         PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         DB_HOST: ${{ secrets.DB_HOST }}
