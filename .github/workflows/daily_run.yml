@@ -1,0 +1,32 @@
+name: 基金自动巡航
+
+on:
+  schedule:
+    # 每天北京时间 14:40 运行 (UTC时间 06:40)
+    # GitHub 用的是 UTC 时间，比我们慢 8 小时
+    - cron: '40 6 * * 1-5' # 周一到周五
+  workflow_dispatch: # 允许你手动点击按钮运行 (方便测试)
+
+jobs:
+  run_bot:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 下载代码
+      uses: actions/checkout@v2
+      
+    - name: 安装 Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+        
+    - name: 安装依赖库
+      run: |
+        pip install akshare pandas requests sqlalchemy pymysql
+        
+    - name: 运行侦察兵 (Realtime)
+      env: # 把保险箱里的密码注入进去
+        PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_HOST: ${{ secrets.DB_HOST }}
+      run: python realtime.py
