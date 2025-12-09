@@ -1,0 +1,18 @@
+# .gitignore
+# --- 这里的名字，Git 会假装看不见 ---
+
+# 1. 绝对不能传的密码文件
+config.py
+
+# 2. 也是密码文件 (如果你有备份的话)
+config_backup.py
+
+# 3. Python 运行产生的垃圾缓存
+__pycache__/
+*.pyc
+
+# 4. 图片文件 (非必须，传上去太占地)
+*.png
+
+# 5. 系统垃圾
+.DS_Store
