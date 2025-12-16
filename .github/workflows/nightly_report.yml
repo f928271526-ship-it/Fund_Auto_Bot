@@ -1,0 +1,48 @@
+name: 晚间复盘报告 (Main)
+
+on:
+  schedule:
+    # 目标：北京时间 22:00
+    # 公式：22 - 8 = 14 (UTC)
+    # 设定为 UTC 14:00 (北京 22:00)
+    - cron: '0 14 * * 1-5' # 周一到周五
+  workflow_dispatch: # 允许手动点
+
+jobs:
+  run_nightly:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 下载代码
+      uses: actions/checkout@v2
+      
+    - name: 安装 Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+        
+    - name: 安装依赖库
+      run: |
+        pip install akshare pandas requests sqlalchemy pymysql matplotlib seaborn
+        
+    # --- 现场生成配置文件 (跟之前一样) ---
+    - name: 生成配置文件
+      run: |
+        echo "import os" > config.py
+        echo "PUSH_CONFIG = {'token': os.environ.get('PUSH_TOKEN')}" >> config.py
+        echo "DB_CONFIG = {'user': 'root', 'password': os.environ.get('DB_PASSWORD'), 'host': os.environ.get('DB_HOST'), 'port': 3306, 'database': 'fund_db'}" >> config.py
+        echo "MY_FUNDS = {" >> config.py
+        echo "    '012363': '国泰证券'," >> config.py
+        echo "    '015916': '永赢医药'," >> config.py
+        echo "    '013275': '富国煤炭'," >> config.py
+        echo "    '006479': '广发纳指100'," >> config.py
+        echo "    '012341': '华宝纳指精选'" >> config.py
+        echo "}" >> config.py
+        
+    # --- 运行主程序 ---
+    - name: 运行指挥官 (Main)
+      env:
+        PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_HOST: ${{ secrets.DB_HOST }}
+      run: python main.py
