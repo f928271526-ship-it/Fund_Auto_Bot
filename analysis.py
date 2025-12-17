@@ -6,6 +6,7 @@ import numpy as np # 需要用到 concat
 from sqlalchemy import create_engine
 from urllib.parse import quote_plus
 import config 
+import os  # <--- 新增这个库，用来新建文件夹
 
 # --- 引入画图库 ---
 import matplotlib.pyplot as plt
@@ -94,13 +95,16 @@ class FundAnalyzer:
         return None, None
 
     def plot_and_save(self, df, code, name):
-        """画图并保存"""
+        """【升级版】画图并分类保存到文件夹"""
         if len(df) < 30: return None
 
         print(f"🎨 绘制 {name}...")
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
         
-        # 上图：布林带
+        # ... (画图代码完全不变，省略中间画图部分，跟之前一样) ...
+        # --- 为了省事，你可以保留你原来的画图逻辑，只改下面保存的部分 ---
+        
+        # === ✄--- 画图代码开始 ---✄ ===
         ax1.plot(df['nav_date'], df['nav_value'], label='净值', color='black')
         ax1.plot(df['nav_date'], df['upper'], label='上轨', color='green', linestyle='--', alpha=0.5)
         ax1.plot(df['nav_date'], df['lower'], label='下轨', color='red', linestyle='--', alpha=0.5)
@@ -109,7 +113,6 @@ class FundAnalyzer:
         ax1.legend(loc='upper left')
         ax1.grid(True)
         
-        # 下图：RSI
         ax2.plot(df['nav_date'], df['rsi'], label='RSI(14)', color='purple')
         ax2.axhline(30, color='green', linestyle='--')
         ax2.axhline(70, color='red', linestyle='--')
@@ -117,12 +120,30 @@ class FundAnalyzer:
         ax2.set_ylim(0, 100)
         ax2.legend(loc='upper left')
         ax2.grid(True)
+        # === ✄--- 画图代码结束 ---✄ ===
+
+        # --- 🔥【核心修改】路径管理 ---
         
+        # 1. 定义大本营文件夹
+        base_dir = "images"
+        
+        # 2. 定义每只基金的专属房间 (例如: images/国泰证券)
+        fund_dir = os.path.join(base_dir, name)
+        
+        # 3. 自动盖房 (如果文件夹不存在，就自动新建)
+        # exist_ok=True: 如果已经有了，就不报错，直接用
+        os.makedirs(fund_dir, exist_ok=True)
+        
+        # 4. 拼接完整路径 (例如: images/国泰证券/20251216.png)
         today_str = df.iloc[-1]['nav_date'].strftime('%Y%m%d')
-        filename = f"{name}_{today_str}.png"
-        plt.savefig(filename)
+        filename = f"{today_str}.png" # 文件名只写日期就行了，因为在文件夹里
+        full_path = os.path.join(fund_dir, filename)
+        
+        # 5. 保存到指定路径
+        plt.savefig(full_path)
         plt.close()
-        return filename
+        
+        return full_path
 
     def run_analysis(self):
         """指挥官：批量分析"""

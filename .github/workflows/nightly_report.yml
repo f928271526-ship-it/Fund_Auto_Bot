@@ -23,7 +23,8 @@ jobs:
         
     - name: 安装依赖库
       run: |
-        pip install akshare pandas requests sqlalchemy pymysql matplotlib seaborn
+        # 加上 cryptography，解决阿里云连接报错
+        pip install akshare pandas requests sqlalchemy pymysql matplotlib seaborn cryptography
         
     # --- 现场生成配置文件 (跟之前一样) ---
     - name: 生成配置文件
