@@ -1,0 +1,42 @@
+name: 基金自动巡航 (14:50)
+
+on:
+  schedule:
+    # 北京时间 14:45 运行 (UTC 06:45)
+    - cron: '45 6 * * 1-5'
+  workflow_dispatch: # 允许手动点击
+
+jobs:
+  run_scout:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 下载代码
+      uses: actions/checkout@v2
+      
+    - name: 安装 Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+        
+    - name: 安装依赖
+      # realtime 不需要数据库驱动，装这些就够了
+      run: pip install akshare pandas requests
+      
+    - name: 生成配置文件 (只为了让代码不报错)
+      # 这里只需要 Token 和 基金列表，数据库密码可以填假占位符
+      run: |
+        echo "import os" > config.py
+        echo "def get_env(k, d): return os.environ.get(k, d)" >> config.py
+        echo "DB_CONFIG = {'user': 'root', 'password': 'placeholder', 'host': 'placeholder', 'port': 3306, 'database': 'fund_db'}" >> config.py
+        echo "PUSH_CONFIG = {'token': os.environ.get('PUSH_TOKEN')}" >> config.py
+        echo "MY_FUNDS = {" >> config.py
+        echo "    '012363': '国泰证券'," >> config.py
+        echo "    '006479': '广发纳指100'," >> config.py
+        echo "    '012341': '华宝纳指精选'" >> config.py
+        echo "}" >> config.py
+
+    - name: 运行侦察兵
+      env:
+        PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+      run: python realtime.py
