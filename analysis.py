@@ -26,9 +26,28 @@ plt.rcParams['axes.unicode_minus'] = False
 class FundAnalyzer:
     def __init__(self):
         """初始化：连接数据库"""
-        db_cfg = config.DB_CONFIG
-        safe_pass = quote_plus(db_cfg['password'])
-        self.conn_str = f"mysql+pymysql://{db_cfg['user']}:{safe_pass}@{db_cfg['host']}:{db_cfg['port']}/{db_cfg['database']}"
+        import os
+        env_pass = os.environ.get('DB_PASSWORD')
+        env_host = os.environ.get('DB_HOST')
+        
+        if env_pass and env_host:
+            # 云端模式
+            user = 'root'
+            password = env_pass
+            host = env_host
+            port = 3306
+            database = 'fund_db'
+        else:
+            # 本地模式
+            db_cfg = config.DB_CONFIG
+            user = db_cfg['user']
+            password = db_cfg['password']
+            host = db_cfg['host']
+            port = db_cfg['port']
+            database = db_cfg['database']
+
+        safe_pass = quote_plus(password)
+        self.conn_str = f"mysql+pymysql://{user}:{safe_pass}@{host}:{port}/{database}"
         self.engine = create_engine(self.conn_str)
 
     def get_fund_data(self, fund_code, limit=120):

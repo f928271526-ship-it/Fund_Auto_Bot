@@ -14,17 +14,33 @@ class DataEngine:
     def __init__(self):
         """初始化：建立数据库连接"""
         print("🔌 正在连接阿里云数据库...")
-        db_cfg = config.DB_CONFIG
         
-        # 处理密码里的特殊字符
-        safe_pass = quote_plus(db_cfg['password'])
+        # --- 🔥【新增】优先读取环境变量 (针对 GitHub Actions) ---
+        import os
+        env_pass = os.environ.get('DB_PASSWORD')
+        env_host = os.environ.get('DB_HOST')
         
-        # 拼接连接串
-        self.conn_str = f"mysql+pymysql://{db_cfg['user']}:{safe_pass}@{db_cfg['host']}:{db_cfg['port']}/{db_cfg['database']}"
+        if env_pass and env_host:
+            # 如果在云端，直接用环境变量，不用 config
+            user = 'root'
+            password = env_pass
+            host = env_host
+            port = 3306
+            database = 'fund_db'
+        else:
+            # 如果在本地，才用 config
+            db_cfg = config.DB_CONFIG
+            user = db_cfg['user']
+            password = db_cfg['password']
+            host = db_cfg['host']
+            port = db_cfg['port']
+            database = db_cfg['database']
+            
+        # 处理密码特殊字符
+        safe_pass = quote_plus(password)
+        self.conn_str = f"mysql+pymysql://{user}:{safe_pass}@{host}:{port}/{database}"
         self.engine = create_engine(self.conn_str)
-        
-        # 自动建表 (防呆设计)
-        self._init_table()
+        # ...
 
     def _init_table(self):
         """内部方法：确保表结构存在"""
