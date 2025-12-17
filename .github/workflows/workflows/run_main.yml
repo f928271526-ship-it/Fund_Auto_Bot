@@ -1,0 +1,53 @@
+name: 晚间自动复盘
+
+on:
+  schedule:
+    # 每天北京时间 22:00 运行 (UTC 14:00)
+    - cron: '0 14 * * 1-5'
+  workflow_dispatch: # 允许你手动点击运行测试
+
+jobs:
+  run_job:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 下载代码
+      uses: actions/checkout@v2
+      
+    - name: 安装 Python 3.10
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10'
+        
+    - name: 安装依赖库
+      # 加上 cryptography 是为了防止 MySQL 8.0 连接报错
+      run: |
+        pip install akshare pandas requests sqlalchemy pymysql matplotlib seaborn cryptography
+
+    - name: 生成云端专用配置文件
+      # 这里用命令行现场生成一个 config.py，只读取 GitHub Secrets
+      # 这样就不需要上传你本地的 config.py 了
+      run: |
+        echo "import os" > config.py
+        echo "def get_env(k, d): return os.environ.get(k, d)" >> config.py
+        echo "DB_CONFIG = {" >> config.py
+        echo "    'user': 'root'," >> config.py
+        echo "    'password': os.environ.get('DB_PASSWORD')," >> config.py
+        echo "    'host': os.environ.get('DB_HOST')," >> config.py
+        echo "    'port': 3306," >> config.py
+        echo "    'database': 'fund_db'" >> config.py
+        echo "}" >> config.py
+        echo "PUSH_CONFIG = {'token': os.environ.get('PUSH_TOKEN')}" >> config.py
+        echo "MY_FUNDS = {" >> config.py
+        echo "    '012363': '国泰证券'," >> config.py
+        echo "    '006479': '广发纳指100'," >> config.py
+        echo "    '012341': '华宝纳指精选'" >> config.py
+        echo "}" >> config.py
+
+    - name: 运行主程序
+      env:
+        # 把 Secrets 注入到环境变量中，给 config.py 读取
+        DB_HOST: ${{ secrets.DB_HOST }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+      run: python main.py
