@@ -29,7 +29,7 @@ jobs:
         echo "import os" > config.py
         echo "def get_env(k, d): return os.environ.get(k, d)" >> config.py
         echo "DB_CONFIG = {" >> config.py
-        echo "    'user': os.environ.get('DB_USER')," >> config.py
+        echo "    'user': 'bot'," >> config.py  # <--- 1. 改成 bot !
         echo "    'password': os.environ.get('DB_PASSWORD')," >> config.py
         echo "    'host': os.environ.get('DB_HOST')," >> config.py
         echo "    'port': 3306," >> config.py
@@ -38,12 +38,10 @@ jobs:
         echo "PUSH_CONFIG = {'token': os.environ.get('PUSH_TOKEN')}" >> config.py
         echo "MY_FUNDS = {" >> config.py
         echo "    '012363': '国泰证券'," >> config.py
-        echo "    '015916': '永赢医药'," >> config.py
-        echo "    '013275': '富国煤炭'," >> config.py
         echo "    '006479': '广发纳指100'," >> config.py
         echo "    '012341': '华宝纳指精选'" >> config.py
+        # 2. 煤炭和医药已经被我删掉了！
         echo "}" >> config.py
-
     - name: 运行主程序
       env:
         # 把 Secrets 注入到环境变量中，给 config.py 读取
