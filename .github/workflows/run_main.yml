@@ -24,17 +24,21 @@ jobs:
       run: |
         pip install akshare pandas requests sqlalchemy pymysql matplotlib seaborn cryptography
 
-    - name: 生成配置文件
+    - name: 生成云端专用配置文件
       run: |
         echo "import os" > config.py
         echo "def get_env(k, d): return os.environ.get(k, d)" >> config.py
+        
+        # --- 🔥 关键修改：直接写死 bot 账号 ---
         echo "DB_CONFIG = {" >> config.py
-        echo "    'user': 'bot'," >> config.py  # <--- 1. 改成 bot !
-        echo "    'password': os.environ.get('DB_PASSWORD')," >> config.py
+        echo "    'user': 'bot'," >> config.py 
+        echo "    'password': 'Bot123456'," >> config.py  # <--- 直接把 bot 的密码写在这！
         echo "    'host': os.environ.get('DB_HOST')," >> config.py
         echo "    'port': 3306," >> config.py
         echo "    'database': 'fund_db'" >> config.py
         echo "}" >> config.py
+        
+        # ... (后面 PushPlus 和 MyFunds 不变) ...
         echo "PUSH_CONFIG = {'token': os.environ.get('PUSH_TOKEN')}" >> config.py
         echo "MY_FUNDS = {" >> config.py
         echo "    '012363': '国泰证券'," >> config.py
