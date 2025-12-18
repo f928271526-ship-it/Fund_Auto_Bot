@@ -31,8 +31,7 @@ jobs:
         echo "import os" > config.py
         echo "def get_env(k, d): return os.environ.get(k, d)" >> config.py
         echo "DB_CONFIG = {" >> config.py
-        echo "    'user': 'root'," >> config.py
-        echo "    'password': os.environ.get('DB_PASSWORD')," >> config.py
+        echo "    'user': os.environ.get('DB_USER')," >> config.py        echo "    'password': os.environ.get('DB_PASSWORD')," >> config.py
         echo "    'host': os.environ.get('DB_HOST')," >> config.py
         echo "    'port': 3306," >> config.py
         echo "    'database': 'fund_db'" >> config.py
@@ -49,5 +48,6 @@ jobs:
         # 把 Secrets 注入到环境变量中，给 config.py 读取
         DB_HOST: ${{ secrets.DB_HOST }}
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_USER: ${{ secrets.DB_USER }}
         PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
       run: python main.py
