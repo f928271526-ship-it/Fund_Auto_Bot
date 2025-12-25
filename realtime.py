@@ -1,53 +1,77 @@
 # realtime.py
-# --- 实时侦察兵 v2.0 (极速直连版) ---
+# --- 实时侦察兵 v3.0 (RSI 智能版) ---
 
 import requests
 import json
 import re
 import time
+import pandas as pd
+from sqlalchemy import create_engine
 import config 
+# 引入数据库连接配置 (确保 config.py 里有这个变量)
+from config import DB_URL 
 
 def get_realtime_estimate(code):
-    """
-    直接访问天天基金的 JS 接口，获取实时估值
-    """
-    # 这是一个神奇的接口，返回的是 JSONP 格式
+    """获取实时估值 (和原来一样)"""
     url = f"http://fundgz.1234567.com.cn/js/{code}.js"
-    
     try:
-        # 发送请求
         resp = requests.get(url, timeout=3)
-        
-        # 返回的数据长这样：jsonpgz({"fundcode":"012363","gszzl":"2.57", ...});
-        # 我们要用正则表达式把它提取出来
-        text = resp.text
-        
-        # 提取括号里的 JSON 内容
-        match = re.search(r'jsonpgz\((.*?)\);', text)
-        
+        match = re.search(r'jsonpgz\((.*?)\);', resp.text)
         if match:
-            data_str = match.group(1)
-            data = json.loads(data_str)
-            
-            # gszzl = 估算增长率 (Gu Suan Zeng Zhang Lv)
-            growth = float(data['gszzl']) 
-            # gztime = 估值时间
-            update_time = data['gztime']
-            
-            return growth, update_time
-        else:
-            return None, None
-            
+            data = json.loads(match.group(1))
+            return float(data['gszzl']), data['gztime']
+        return None, None
     except Exception as e:
-        print(f"❌ {code} 抓取失败: {e}")
+        print(f"❌ {code} 网络抓取失败: {e}")
         return None, None
 
-def send_wechat(title, content):
-    """发送微信 (复用 main.py 的逻辑)"""
-    if not config.PUSH_CONFIG['token']:
-        print("⚠️ 没填 Token，跳过微信发送")
-        return
+def calculate_realtime_rsi(code, current_growth):
+    """
+    🔥 核心升级：结合历史数据 + 实时涨跌，算出现在的 RSI
+    """
+    try:
+        # 1. 连数据库取最近 30 条数据
+        engine = create_engine(DB_URL)
+        # 注意：这里要用 nav_date 排序
+        sql = f"SELECT nav_value FROM fund_nav_history WHERE fund_code='{code}' ORDER BY nav_date ASC LIMIT 30"
+        df = pd.read_sql(sql, engine)
+        
+        if df.empty:
+            return None # 没历史数据，算不了
 
+        # 2. 构造“今天”的数据
+        last_nav = df['nav_value'].iloc[-1]
+        # 今天的估算净值 = 昨天的净值 * (1 + 涨跌幅%)
+        current_nav = float(last_nav) * (1 + current_growth / 100)
+        
+        # 3. 把今天拼接到历史数据后面
+        # 兼容性写法：用 DataFrame 构造新行
+        new_row = pd.DataFrame({'nav_value': [current_nav]})
+        df = pd.concat([df, new_row], ignore_index=True)
+        
+        # 4. 计算 RSI (和 analysis.py 的逻辑一模一样)
+        change = df['nav_value'].diff()
+        gain = change.clip(lower=0)
+        loss = change.clip(upper=0).abs()
+        
+        avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+        avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+        
+        if avg_loss.iloc[-1] == 0:
+            return 100
+            
+        rs = avg_gain.iloc[-1] / avg_loss.iloc[-1]
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi
+
+    except Exception as e:
+        print(f"⚠️ {code} RSI 计算出错: {e}")
+        return None
+
+def send_wechat(title, content):
+    """发送微信"""
+    if not config.PUSH_CONFIG['token']: return
     url = 'http://www.pushplus.plus/send'
     data = {
         "token": config.PUSH_CONFIG['token'],
@@ -62,60 +86,65 @@ def send_wechat(title, content):
         print(f"❌ 推送报错: {e}")
 
 def job_1450():
-    print(f"⏰ 14:50 实时监控启动... (当前时间: {time.strftime('%H:%M:%S')})")
+    print(f"⏰ 14:50 实时监控启动...")
     msg_lines = []
     
-    # 遍历你在 config.py 里配置的所有基金
     for code, name in config.MY_FUNDS.items():
         growth, update_time = get_realtime_estimate(code)
         
         if growth is None:
-            print(f"❌ {name}: 无数据 (可能代码填错了？)")
             continue
             
-        # --- 战术板 (根据跌幅生成建议) ---
+        # 算 RSI
+        real_rsi = calculate_realtime_rsi(code, growth)
+        
+        # 默认状态
         action = "⚪ 观望"
-        color = "black" # 默认颜色
+        color = "black"
+        rsi_msg = f"{real_rsi:.1f}" if real_rsi else "N/A"
         
-        # 证券策略
+        # =========== 🔥 核心：策略分流 (Strategy Router) ===========
+        
+        # 1. 国泰证券专用通道 (激进波段)
         if "证券" in name:
-            if growth < -1.2:
-                action = "🟢 【黄金坑！买入！】"
-                color = "green"
-            elif growth > 2.0:
-                action = "🔴 【大涨！止盈观察】"
+            target_rsi = 37  # 你的回测结论
+            
+            if real_rsi and real_rsi < target_rsi:
+                action = f"🟢 【黄金坑! RSI<{target_rsi}】"
+                color = "#00CC00" # 亮绿
+            elif real_rsi and real_rsi > 75: # 证券波动大，卖点可以高一点
+                action = "🔴 【过热! 止盈】"
                 color = "red"
-        
-        # 煤炭策略
-       # 煤炭策略 (修改版)
-        elif "煤炭" in name:
-            if growth < -3.0:
-                action = "⚪ 【超跌！别割肉】"
+            elif growth < -1.5:
+                action = "🟢 【大跌补仓(RSI盲补)】"
                 color = "green"
-            # --- 修改这里 ---
-            elif growth > 0.1:  # 只要涨幅大于 0.1% (几乎是只要红了)
-                action = "✂️ 【微红也是肉！减仓换车！】" 
-                color = "red"
-            # ---------------
 
-        # 纳指策略
+        # 2. 纳指专用通道 (防守躺平)
         elif "纳" in name:
-             action = "🔵 【美股！长期持有】"
-
-        # 打印到屏幕
-        print(f"{name}: {growth}%  [{update_time}]")
+            # 纳指不看 RSI<37，只看极度恐慌 (比如 RSI<20 才是真崩盘) 或者无脑定投
+            if real_rsi and real_rsi < 25: 
+                action = "💎 【史诗级机会! 加仓!】" # 纳指很难跌到这，跌到就是送钱
+                color = "purple"
+            else:
+                action = "🔵 【躺平持有】" # 平时不管怎么跌都不卖
+                color = "gray"
         
-        # 组装微信消息 (HTML格式)
-        # style='color:...' 可以让微信里的字变色
-        line = f"<b>{name}</b>: <span style='color:{color}'>{growth}%</span> ({action})"
+        # 3. 煤炭/其他通道
+        elif "煤" in name:
+             if real_rsi and real_rsi < 30: # 煤炭可能还是适合 30
+                 action = "🟢 【煤炭超跌】"
+                 color = "green"
+        
+        # =======================================================
+
+        print(f"{name}: {growth}% (RSI:{rsi_msg}) -> {action}")
+        
+        line = f"<b>{name}</b>: <span style='color:{color}'>{growth}%</span> (RSI:{rsi_msg}) <br>{action}"
         msg_lines.append(line)
 
-    # 发送汇总
     if msg_lines:
-        send_wechat("14:50 实时操作指令", "<br>".join(msg_lines))
+        send_wechat("14:50 盘中指令", "<br><br>".join(msg_lines))
         print("✅ 任务完成！")
-    else:
-        print("⚠️ 没有获取到任何数据，检查网络或代码。")
 
 if __name__ == "__main__":
     job_1450()

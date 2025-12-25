@@ -195,15 +195,15 @@ class FundAnalyzer:
 
             # 策略逻辑
             signal = "☁️ 观望"
-            if rsi < 30: signal = "💎 极度超卖"
+            if rsi < 37: signal = "💎 极度超卖"
             elif dist_to_low < 0: signal = "🔥 跌破下轨"
             elif rsi > 70: signal = "🚨 过热"
             
             # 🔮 调用预测算法 (倒推明日)
-            target_drop, target_price = self.predict_next_rsi_target(df, target_rsi=30)
-            predict_msg = "安全(跌停也不破30)"
+            target_drop, target_price = self.predict_next_rsi_target(df, target_rsi=37)
+            predict_msg = "安全(跌停也不破37)"
             if target_drop is not None:
-                predict_msg = f"跌 {target_drop:.1f}% (价位{target_price:.4f}) 破30"
+                predict_msg = f"跌 {target_drop:.1f}% (价位{target_price:.4f}) 破37"
 
             # 组装单条报告
             report_item = (
