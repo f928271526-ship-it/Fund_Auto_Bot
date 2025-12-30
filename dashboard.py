@@ -78,96 +78,109 @@ def calculate_indicators(df,rsi_threshold=30):
 
     return df
 # --- 4. 主界面逻辑 ---
-st.title(f'📈{fund_name}({fund_code})实战分析')
+st.title(f'📈 {fund_name} ({fund_code}) 实战分析')
 
+# [修复1] 加上 try-except 捕获所有潜在错误
 try:
-    with st.spinner('正在从阿里云/互联网拉取数据...'):
-         # 获取并清洗数据
-         raw_df = get_data (fund_code)
-         df = calculate_indicators(raw_df,rsi_input)
-         # 截取最近 N 天
-         data = df.tail(days)
-         last_day = data.iloc[-1]
-         # --- 5. 展示关键指标 (KPI) ---
-         col1,col2,col3 = st.columns(3)
-    with col1 :
-             st.metric("最新净值", f"{last_day['单位净值']:.4f}", f"{last_day['单位净值'] - data.iloc[-2]['单位净值']:.4f}")
-    with col2:
-         rsi_val = last_day['RSI']
-         # 根据 RSI 变颜色
-         rsi_color = 'normal'
-         if rsi_val <30 :rsi_color = 'inverse'
-         st.metric("RSI 情绪值", f"{rsi_val:.2f}", delta="低于30是机会" if rsi_val < 30 else '正常')
-    with col3 :
-         # 距离下轨空间
-         dist = (last_day['单位净值'] - last_day['LOW']) / last_day['LOW']*100 
-         st.metric('距离下轨',f'{dist:.2f}%',delta_color='off')
-     # --- 6. 画交互式 K 线图 (Plotly) ---
-    st.subheader('📊 战术走势图')
-    fig = go.Figure()
-    # 画净值线
-    fig.add_trace(go.Scatter(x=data['净值日期'],y = data['单位净值'],mode ='lines',name = '净值',line = dict(color = 'black',width = 2)))
-    # 画布林带
-    fig.add_trace(go.Scatter(x=data['净值日期'],y=data['UP'],mode = 'lines',name = '压力线',line = dict(color = 'green',width = 2)))
-    fig.add_trace(go.Scatter(x=data['净值日期'],y=data['LOW'],mode = 'lines',name = '支撑线',line = dict(color = 'red',width = 2)))
-    # ... 上面是 fig.add_trace(go.Scatter(... name='支撑线')) ...
+    with st.spinner('正在从阿里云/本地数据库拉取数据...'):
+        # 1. 获取并清洗数据
+        raw_df = get_data(fund_code)
+        
+        # [修复2] 关键防御：如果数据库里没这个基金，直接报错并停止，别硬往下跑！
+        if raw_df.empty:
+            st.error(f"❌ 错误：数据库中找不到基金 {fund_code}！")
+            st.info("💡 解决办法：请先运行 data_engine.py 把这个基金的数据抓取入库，再来刷新网页。")
+            st.stop() # 强制停止后续代码执行
 
-    # =========== 👇 新增代码开始 👇 ============
-    
-    # 1. 筛选出符合“黄金坑”策略的日子 (RSI < 30)
-    # [Syntax Autopsy]: 这里用了布尔索引。只保留 RSI 小于 30 的行。
-    buy_signals = data[data['RSI'] < 30]
+        # 2. 计算指标
+        df = calculate_indicators(raw_df, rsi_input)
+        
+        # 3. 截取最近 N 天
+        data = df.tail(days)
+        
+        # [修复3] 二次防御：确保截取后还有数据
+        if data.empty:
+             st.warning("⚠️ 数据不足，无法分析。")
+             st.stop()
 
-    # 2. 在图上画出买入信号 (绿色向上三角)
-    if not buy_signals.empty:
-        fig.add_trace(go.Scatter(
-            x=buy_signals['净值日期'], 
-            y=buy_signals['LOW'], # 标记画在布林带下轨附近，不挡视线
-            mode='markers',       # [Syntax Autopsy]: mode='lines'是画线，'markers'是画点
-            name='黄金坑买点',
-            marker=dict(
-                symbol='triangle-up', # 向上三角
-                size=12,              # 大小
-                color='#00CC00',      # 鲜艳的绿色
-            )
-        ))
-    
-    # =========== 👆 新增代码结束 👆 ============
+        last_day = data.iloc[-1]
+        
+        # --- 5. 展示关键指标 (KPI) ---
+        # [修复4] 规范缩进：st.columns 必须对齐
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # 计算涨跌值
+            prev_price = data.iloc[-2]['单位净值'] if len(data) > 1 else last_day['单位净值']
+            diff = last_day['单位净值'] - prev_price
+            st.metric("最新净值", f"{last_day['单位净值']:.4f}", f"{diff:.4f}")
+            
+        with col2:
+            rsi_val = last_day['RSI']
+            if rsi_val < 30:
+                st.metric("RSI 情绪值", f"{rsi_val:.2f}", "💎 黄金坑 (机会)", delta_color="inverse")
+            elif rsi_val > 70:
+                st.metric("RSI 情绪值", f"{rsi_val:.2f}", "🔥 严重过热 (止盈)", delta_color="normal")
+            else:
+                st.metric("RSI 情绪值", f"{rsi_val:.2f}", "😐 正常震荡", delta_color="off")
+            
+        with col3:
+            # 距离下轨空间
+            dist = (last_day['单位净值'] - last_day['LOW']) / last_day['LOW'] * 100
+            st.metric('距离下轨', f'{dist:.2f}%', delta_color='off')
 
-    # ... 下面是 fig.update_layout(...) ...
-    # 更新布局
-    fig.update_layout(height = 500,xaxis_title = '日期',yaxis_title = '净值',hovermode = 'x unified')
-     # 展示图表
-    st.plotly_chart(fig,use_container_width=True)
-    # 资金曲线对比图
-    st.markdown('### 🆚 收益率大比拼')
-    # 算一下总收益率让用户死心
-    start_total = (df['strategy_curve'].iloc[-1]-1)*100
-    market_total = (df['market_curve'].iloc[-1]-1)*100
-    c1,c2=st.columns(2)
-    c1.metric('傻傻拿着(基准)',f'{market_total:.2f}%')
-    # delta 显示超额收益
-    c2.metric(f'RSI<{rsi_input}波段策略',f'{start_total:.2f}%',delta=f'{start_total - market_total:.2f}%')
-    fig_bt=go.Figure()
-    fig_bt.add_trace(go.Scatter(x=df['净值日期'],y=df['market_curve'],name='躺平不动',line=dict(dash='dash',color='gray')))
-    fig_bt.add_trace(go.Scatter(x=df['净值日期'],y=df['strategy_curve'],name='波段操作',line=dict(color='red',width=2)))
-    st.plotly_chart(fig_bt,use_container_width=True)
+        # --- 6. 画交互式 K 线图 (Plotly) ---
+        st.subheader('📊 战术走势图')
+        fig = go.Figure()
+        
+        # 画线
+        fig.add_trace(go.Scatter(x=data['净值日期'], y=data['单位净值'], mode='lines', name='净值', line=dict(color='black', width=2)))
+        fig.add_trace(go.Scatter(x=data['净值日期'], y=data['UP'], mode='lines', name='压力线', line=dict(color='green', width=1)))
+        fig.add_trace(go.Scatter(x=data['净值日期'], y=data['LOW'], mode='lines', name='支撑线', line=dict(color='red', width=1)))
 
+        # 黄金坑标记
+        buy_signals = data[data['RSI'] < 30]
+        if not buy_signals.empty:
+            fig.add_trace(go.Scatter(
+                x=buy_signals['净值日期'], 
+                y=buy_signals['LOW'],
+                mode='markers',
+                name='黄金坑买点',
+                marker=dict(symbol='triangle-up', size=12, color='#00CC00')
+            ))
 
+        fig.update_layout(height=500, xaxis_title='日期', yaxis_title='净值', hovermode='x unified')
+        st.plotly_chart(fig, use_container_width=True)
 
-    # --- 7. 给出 AI 建议 ---
-    st.subheader('🤖 符清华 AI 助理建议')
-    if rsi_val <30:
-         st.error(f'💎 触发【黄金坑】信号! RSI={rsi_val:.2f}建议:买入!')
-    elif dist<0:
-         st.warning(f'🔥 触发【破轨】信号！跌破下轨 {dist:.2f}%。建议：分批抄底。')
-    elif rsi_val > 70:
-         st.error(f'🚨 触发【过热】信号! RSI = {rsi_val:.2f}。建议：止盈')
-    else:
-         st.info('☁️ 目前处于垃圾时间 (震荡区)。建议：多看少动，喝杯茶。')
+        # --- 资金曲线 ---
+        st.markdown('### 🆚 收益率大比拼')
+        start_total = (df['strategy_curve'].iloc[-1] - 1) * 100
+        market_total = (df['market_curve'].iloc[-1] - 1) * 100
+        
+        c1, c2 = st.columns(2)
+        c1.metric('傻傻拿着(基准)', f'{market_total:.2f}%')
+        c2.metric(f'RSI<{rsi_input}波段策略', f'{start_total:.2f}%', delta=f'{start_total - market_total:.2f}%')
+        
+        fig_bt = go.Figure()
+        fig_bt.add_trace(go.Scatter(x=df['净值日期'], y=df['market_curve'], name='躺平不动', line=dict(dash='dash', color='gray')))
+        fig_bt.add_trace(go.Scatter(x=df['净值日期'], y=df['strategy_curve'], name='波段操作', line=dict(color='red', width=2)))
+        st.plotly_chart(fig_bt, use_container_width=True)
+
+        # --- 7. AI 建议 ---
+        st.subheader('🤖 符清华 AI 助理建议')
+        if rsi_val < 30:
+            st.error(f'💎 触发【黄金坑】信号! RSI={rsi_val:.2f} 建议: 考虑分批建仓！')
+        elif dist < 0:
+            st.warning(f'🔥 触发【破轨】信号！跌破下轨 {dist:.2f}%。建议：关注反弹机会。')
+        elif rsi_val > 70:
+            st.error(f'🚨 触发【过热】信号! RSI = {rsi_val:.2f}。建议：止盈/减仓！')
+        else:
+            st.info('☁️ 目前处于垃圾时间 (震荡区)。建议：多看少动，喝杯茶。')
 
 except Exception as e:
-     st.error(f'出错了：{e}。请检查代码是否正确。') 
+    # 这里会捕获 SQL 连接失败等系统级错误
+    st.error(f'系统崩溃了：{e}')
+    st.markdown("Please check your `config.py` or Database connection.") 
 
           
         
