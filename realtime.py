@@ -1,18 +1,20 @@
 # realtime.py
-# --- 实时侦察兵 v3.0 (RSI 智能版) ---
+# --- 实时侦察兵 v4.0 (云端脱机版) ---
+# 修改日志：
+# 1. 移除数据库依赖，改用 Akshare 现场抓取历史数据，解决 GitHub Action 连不上库的问题。
+# 2. 增加 CPO/5G 策略通道。
 
 import requests
 import json
 import re
-import time
 import pandas as pd
-from sqlalchemy import create_engine
+import akshare as ak  # 必须确保 requirements.txt 里有 akshare
 import config 
-# 引入数据库连接配置 (确保 config.py 里有这个变量)
-from config import DB_URL 
 
 def get_realtime_estimate(code):
-    """获取实时估值 (和原来一样)"""
+    """
+    获取实时估值 (爬取天天基金估值接口)
+    """
     url = f"http://fundgz.1234567.com.cn/js/{code}.js"
     try:
         resp = requests.get(url, timeout=3)
@@ -22,41 +24,44 @@ def get_realtime_estimate(code):
             return float(data['gszzl']), data['gztime']
         return None, None
     except Exception as e:
-        print(f"❌ {code} 网络抓取失败: {e}")
+        print(f"❌ {code} 实时估值抓取失败: {e}")
         return None, None
 
-def calculate_realtime_rsi(code, current_growth):
+def calculate_realtime_rsi_online(code, current_growth):
     """
-    🔥 核心升级：结合历史数据 + 实时涨跌，算出现在的 RSI
+    🔥 核心升级：不连数据库，直接从互联网抓历史净值 + 实时涨跌 -> 算出 RSI
     """
     try:
-        # 1. 连数据库取最近 30 条数据
-        engine = create_engine(DB_URL)
-        # 注意：这里要用 nav_date 排序
-        sql = f"SELECT nav_value FROM fund_nav_history WHERE fund_code='{code}' ORDER BY nav_date ASC LIMIT 30"
-        df = pd.read_sql(sql, engine)
+        # 1. 临时抓取最近的历史净值 (利用 Akshare)
+        # indicator="单位净值走势" 能抓到该基金所有历史数据
+        df_hist = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
         
-        if df.empty:
-            return None # 没历史数据，算不了
-
-        # 2. 构造“今天”的数据
-        last_nav = df['nav_value'].iloc[-1]
-        # 今天的估算净值 = 昨天的净值 * (1 + 涨跌幅%)
+        # 2. 清洗数据
+        df_hist = df_hist[['净值日期', '单位净值']]
+        df_hist.columns = ['date', 'value']
+        df_hist['value'] = pd.to_numeric(df_hist['value'])
+        
+        # 3. 截取最近 30 天 (减少计算量)
+        df = df_hist.tail(30).copy()
+        
+        # 4. 构造“今天”的数据 (T日)
+        # 逻辑：今天的估算净值 = 昨天的净值 * (1 + 实时涨跌幅%)
+        last_nav = df['value'].iloc[-1]
         current_nav = float(last_nav) * (1 + current_growth / 100)
         
-        # 3. 把今天拼接到历史数据后面
-        # 兼容性写法：用 DataFrame 构造新行
-        new_row = pd.DataFrame({'nav_value': [current_nav]})
+        # 5. 拼接到最后
+        new_row = pd.DataFrame({'date': ['Today'], 'value': [current_nav]})
         df = pd.concat([df, new_row], ignore_index=True)
         
-        # 4. 计算 RSI (和 analysis.py 的逻辑一模一样)
-        change = df['nav_value'].diff()
+        # 6. 计算 RSI (标准的 pandas 算法)
+        change = df['value'].diff()
         gain = change.clip(lower=0)
         loss = change.clip(upper=0).abs()
         
-        avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
-        avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+        avg_gain = gain.ewm(com=13, adjust=False).mean() # com=13 等同于 alpha=1/14
+        avg_loss = loss.ewm(com=13, adjust=False).mean()
         
+        # 防除零错误
         if avg_loss.iloc[-1] == 0:
             return 100
             
@@ -66,12 +71,15 @@ def calculate_realtime_rsi(code, current_growth):
         return rsi
 
     except Exception as e:
-        print(f"⚠️ {code} RSI 计算出错: {e}")
+        print(f"⚠️ {code} RSI 计算出错 (Akshare): {e}")
         return None
 
 def send_wechat(title, content):
-    """发送微信"""
-    if not config.PUSH_CONFIG['token']: return
+    """发送微信 (PushPlus)"""
+    if not config.PUSH_CONFIG['token']: 
+        print("⚠️ 未配置 Push Token，跳过发送")
+        return
+        
     url = 'http://www.pushplus.plus/send'
     data = {
         "token": config.PUSH_CONFIG['token'],
@@ -86,65 +94,80 @@ def send_wechat(title, content):
         print(f"❌ 推送报错: {e}")
 
 def job_1450():
-    print(f"⏰ 14:50 实时监控启动...")
+    print(f"⏰ 14:50 实时监控启动 (Cloud Mode)...")
     msg_lines = []
     
+    # 遍历配置里的基金列表
     for code, name in config.MY_FUNDS.items():
+        print(f"正在侦察: {name} ({code})...")
         growth, update_time = get_realtime_estimate(code)
         
         if growth is None:
+            print(f"  -> 无法获取估值，跳过")
             continue
             
-        # 算 RSI
-        real_rsi = calculate_realtime_rsi(code, growth)
+        # 算 RSI (云端版)
+        real_rsi = calculate_realtime_rsi_online(code, growth)
         
-        # 默认状态
+        # --- 决策逻辑 ---
         action = "⚪ 观望"
         color = "black"
         rsi_msg = f"{real_rsi:.1f}" if real_rsi else "N/A"
         
-        # =========== 🔥 核心：策略分流 (Strategy Router) ===========
+        # =========== 🔥 策略分流 (Strategy Router) ===========
         
-        # 1. 国泰证券专用通道 (激进波段)
+        # 1. 国泰证券 / 券商
         if "证券" in name:
-            target_rsi = 37  # 你的回测结论
-            
+            target_rsi = 37
             if real_rsi and real_rsi < target_rsi:
                 action = f"🟢 【黄金坑! RSI<{target_rsi}】"
                 color = "#00CC00" # 亮绿
-            elif real_rsi and real_rsi > 75: # 证券波动大，卖点可以高一点
-                action = "🔴 【过热! 止盈】"
+            elif real_rsi and real_rsi > 75: 
+                action = "🔴 【过热! 建议止盈】"
                 color = "red"
-            elif growth < -1.5:
-                action = "🟢 【大跌补仓(RSI盲补)】"
+            elif growth < -1.2:
+                action = "🟢 【大跌博反弹】"
                 color = "green"
 
-        # 2. 纳指专用通道 (防守躺平)
-        elif "纳" in name:
-            # 纳指不看 RSI<37，只看极度恐慌 (比如 RSI<20 才是真崩盘) 或者无脑定投
-            if real_rsi and real_rsi < 25: 
-                action = "💎 【史诗级机会! 加仓!】" # 纳指很难跌到这，跌到就是送钱
+        # 2. 纳指 / 美股 (防守)
+        elif "纳" in name or "标普" in name:
+            if real_rsi and real_rsi < 30: 
+                action = "💎 【罕见机会! 加仓!】" 
                 color = "purple"
             else:
-                action = "🔵 【躺平持有】" # 平时不管怎么跌都不卖
+                action = "🔵 【躺平持有】" 
                 color = "gray"
         
-        # 3. 煤炭/其他通道
-        elif "煤" in name:
-             if real_rsi and real_rsi < 30: # 煤炭可能还是适合 30
-                 action = "🟢 【煤炭超跌】"
+        # 3. CPO / 5G / 科技 (高波动新宠)
+        elif "5G" in name or "CPO" in name or "科技" in name:
+             if real_rsi and real_rsi < 35: 
+                 action = "🟢 【科技超跌】"
+                 color = "green"
+             elif real_rsi and real_rsi > 70:
+                 action = "🔥 【高危预警! 减仓】"
+                 color = "#FF4500" # 橙红
+             else:
+                 action = "😐 【震荡观察】"
+                 
+        # 4. 其他 (默认)
+        else:
+             if real_rsi and real_rsi < 30:
+                 action = "🟢 【RSI低位】"
                  color = "green"
         
         # =======================================================
 
-        print(f"{name}: {growth}% (RSI:{rsi_msg}) -> {action}")
+        print(f"  -> 结果: {growth}% (RSI:{rsi_msg}) -> {action}")
         
-        line = f"<b>{name}</b>: <span style='color:{color}'>{growth}%</span> (RSI:{rsi_msg}) <br>{action}"
+        # 构造 HTML 消息行
+        # 格式： 基金名: +1.5% (RSI: 65)
+        #       [操作建议]
+        line = f"<b>{name}</b> ({code}): <span style='color:{'red' if growth>0 else 'green'}'>{growth}%</span> (RSI:{rsi_msg}) <br>{action}"
         msg_lines.append(line)
 
     if msg_lines:
-        send_wechat("14:50 盘中指令", "<br><br>".join(msg_lines))
-        print("✅ 任务完成！")
+        send_wechat("14:50 盘中信号", "<br><br>".join(msg_lines))
+        print("✅ 所有任务完成！")
 
 if __name__ == "__main__":
     job_1450()
